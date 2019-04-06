@@ -1,0 +1,20 @@
+Maximize spendable income w.r.t. current & projected assets
+
+Assumptions:
+	- All tax is paid by cash, not money in accounts
+
+Input (--> is programmatically determined input):
+	- Inflation
+	- Roth IRA
+		- Current value
+		- Expected rate of return
+	- IRA
+		- Current value + basis value 
+		- Expected rate of return
+		--> Required minimum distributions
+	- Other income sources:
+		- Social Security
+		  --> Required minimum distributions
+		--> Tax brackets
+
+
