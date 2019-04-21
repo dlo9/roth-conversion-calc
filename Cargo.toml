@@ -5,3 +5,4 @@ authors = ["David Orchard <if_coding@fastmail.com>"]
 edition = "2018"
 
 [dependencies]
+#finance-math = "0.0.1"
