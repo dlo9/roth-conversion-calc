@@ -2,6 +2,9 @@
 //pub fn add(a: u64, b: u64) -> u64 {
 //    a + b
 //}
+//
+//
+//// TODO: tax tables, etc: https://taxmap.irs.gov/taxmap/ts0/taxtable_o_03b62156.htm
 
 pub struct ProjectArgs {
     yearly_taxable_income_excluding_ira: u64,
