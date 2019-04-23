@@ -42,9 +42,11 @@ impl ProjectArgs {
     }
 }
 
+// TODO: ira needs a basis amount
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct State {
     adjusted_spendable_income: u64,
+    pending_rollover: u64,
     now: NaiveDate,
     roth_present_value: u64,
     ira_present_value: u64,
@@ -55,29 +57,51 @@ type Cost = u64;
 impl State {
     fn step_time(&self, args: &ProjectArgs) -> Result<(State, Cost), Error> {
         let now = self.now.checked_add_signed(Duration::days(365)).ok_or_else(|| err_msg("overflow"))?;
+        // TODO: is the rollover & RMD meshing properly?
         let ira_value = ((self.ira_present_value as f64) * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate)) as u64;
-        let ira_rmd = get_rmd(args.birthday, now, ira_value)?;
+        let ira_rmd = get_rmd(args.birthday, now, ira_value)?.checked_sub(self.pending_rollover).unwrap_or_default();
+        let ira_value = ira_value - self.pending_rollover - ira_rmd;
 
         let roth_value = ((self.roth_present_value as f64) * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate)) as u64;
+        let roth_value = roth_value + self.pending_rollover;
 
-        let taxable_income = args.yearly_taxable_income_excluding_ira + ira_rmd;
+        let taxable_income = args.yearly_taxable_income_excluding_ira + self.pending_rollover + ira_rmd;
         let tax = get_tax(taxable_income);
 
         Ok((State {
             adjusted_spendable_income: self.adjusted_spendable_income + taxable_income,
+            pending_rollover: 0,
             roth_present_value: roth_value,
-            ira_present_value: ira_value - ira_rmd,
+            ira_present_value: ira_value,
             now: now,
+            // TODO: want to maximize income, not minimize tax
         }, tax)) 
     }
 
+    fn step_rollover(&self, rollover_amount: u64) -> Option<(State, Cost)> {
+        let pending_rollover = rollover_amount + self.pending_rollover;
+        if self.ira_present_value > pending_rollover {
+            Some((State {
+                pending_rollover: pending_rollover,
+                .. *self
+            }, 0))
+        } else {
+            None
+        }
+
+    }
+
     fn successors(&self, args: &ProjectArgs) -> Result<Vec<(State, Cost)>, Error> {
+        // TODO: place in args
+        let rollover_amount = 1000;
+
         Ok(if self.now >= args.end_date {
             vec![]
         } else {
             vec![
-                self.step_time(args)?
-            ]
+                self.step_time(args).ok(),
+                self.step_rollover(rollover_amount),
+            ].into_iter().filter_map(|x| x).collect()
         })
     }
 }
@@ -90,18 +114,19 @@ pub fn project(args: ProjectArgs) -> Option<(Vec<State>, Cost)> {
 
     let start = State {
         adjusted_spendable_income: 0,
+        pending_rollover: 0,
         // TODO: Pass in from args instead, so tests are reproducible
         now: args.now,
         roth_present_value: args.roth_present_value,
         ira_present_value: args.ira_present_value,
     };
 
-    astar(&start,
-          |ref s| s.successors(&args).unwrap(),
-          // TODO: improve
-          |_| get_tax(args.yearly_taxable_income_excluding_ira),
-          |ref s| dbg!(s).now >= args.end_date,
-          )
+    dbg!(astar(&start,
+               |ref s| s.successors(&args).unwrap(),
+               // TODO: improve
+               |_| get_tax(args.yearly_taxable_income_excluding_ira),
+               |ref s| s.now >= args.end_date,
+               ))
 }
 
 pub fn get_rmd(birthday: NaiveDate, now: NaiveDate, ira_value: u64) -> Result<u64, Error> {
