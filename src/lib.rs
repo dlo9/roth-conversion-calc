@@ -1,15 +1,6 @@
-//#[wasm_bindgen]
-//pub fn add(a: u64, b: u64) -> u64 {
-//    a + b
-//}
-//
-//
-//// TODO: tax tables, etc: https://taxmap.irs.gov/taxmap/ts0/taxtable_o_03b62156.htm
-
 use pathfinding::prelude::astar;
 use chrono::Duration;
 use chrono::naive::NaiveDate;
-use chrono::offset::Utc;
 use failure::*;
 
 pub struct ProjectArgs {
@@ -22,6 +13,33 @@ pub struct ProjectArgs {
     ira_effective_annual_rate: f64,
     birthday: NaiveDate,
     end_date: NaiveDate,
+    now: NaiveDate,
+}
+
+impl ProjectArgs {
+    #[allow(unused_comparisons)]
+    fn validate(&self) -> Result<(), Error> {
+        // TODO: make custom types with validation ranges (from macro?), checked operations
+        Err(if self.yearly_taxable_income_excluding_ira < 0 {
+            err_msg("Yearly taxable income must be >= 0")
+        } else if self.inflation_effective_annual_rate > 1.0 || self.inflation_effective_annual_rate < 0.0 {
+            err_msg("Inflation must be between 0 and 1")
+        } else if self.roth_present_value < 0{
+            err_msg("Roth value must be >= 0")
+        } else if self.roth_effective_annual_rate > 1.0 || self.roth_effective_annual_rate < 0.0 {
+            err_msg("Roth rate must be between 0 and 1")
+        } else if self.ira_present_value < 0{
+            err_msg("IRA value must be >= 0")
+        } else if self.ira_effective_annual_rate > 1.0 || self.ira_effective_annual_rate < 0.0 {
+            err_msg("IRA rate must be between 0 and 1")
+        } else if self.birthday > self.now {
+            err_msg("Birthday must be <= now")
+        } else if self.end_date < self.now {
+            err_msg("End date must be >= now")
+        } else {
+            return Ok(())
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -64,21 +82,26 @@ impl State {
     }
 }
 
+// TODO: #[wasm_bindgen]
 pub fn project(args: ProjectArgs) -> Option<(Vec<State>, Cost)> {
+    if args.validate().is_err() {
+        return None;
+    }
+
     let start = State {
         adjusted_spendable_income: 0,
         // TODO: Pass in from args instead, so tests are reproducible
-        now: Utc::today().naive_utc(),
+        now: args.now,
         roth_present_value: args.roth_present_value,
         ira_present_value: args.ira_present_value,
     };
 
-    dbg!(astar(&start, 
-               |ref s| s.successors(&args).unwrap(),
-               // TODO: improve
-               |ref s| get_tax(args.yearly_taxable_income_excluding_ira),
-               |ref s| dbg!(s).now >= args.end_date,
-               ))
+    astar(&start,
+          |ref s| s.successors(&args).unwrap(),
+          // TODO: improve
+          |_| get_tax(args.yearly_taxable_income_excluding_ira),
+          |ref s| dbg!(s).now >= args.end_date,
+          )
 }
 
 pub fn get_rmd(birthday: NaiveDate, now: NaiveDate, ira_value: u64) -> Result<u64, Error> {
@@ -93,6 +116,7 @@ pub fn get_rmd(birthday: NaiveDate, now: NaiveDate, ira_value: u64) -> Result<u6
     })
 }
 
+// TODO: tax tables, etc: https://taxmap.irs.gov/taxmap/ts0/taxtable_o_03b62156.htm
 pub fn get_tax(taxable_income: u64) -> u64 {
     (taxable_income as f64 * 0.1) as u64
 }
@@ -123,6 +147,7 @@ mod tests {
             ira_effective_annual_rate: 0.08,
             birthday: NaiveDate::from_ymd(1960, 6,  3),
             end_date: NaiveDate::from_ymd(2030, 6,  3),
+            now: NaiveDate::from_ymd(2019, 4, 22),
         }).is_some());
     }
 }
