@@ -124,7 +124,7 @@ pub fn project(args: ProjectArgs) -> Option<(Vec<State>, Cost)> {
     dbg!(astar(&start,
                |ref s| s.successors(&args).unwrap(),
                // TODO: improve
-               |_| get_tax(args.yearly_taxable_income_excluding_ira),
+               |ref s| get_tax(args.yearly_taxable_income_excluding_ira + s.pending_rollover),
                |ref s| s.now >= args.end_date,
                ))
 }
@@ -170,8 +170,8 @@ mod tests {
             roth_effective_annual_rate: 0.08,
             ira_present_value: 6000,
             ira_effective_annual_rate: 0.08,
-            birthday: NaiveDate::from_ymd(1960, 6,  3),
-            end_date: NaiveDate::from_ymd(2030, 6,  3),
+            birthday: NaiveDate::from_ymd(1955, 6,  3),
+            end_date: NaiveDate::from_ymd(2040, 6,  3),
             now: NaiveDate::from_ymd(2019, 4, 22),
         }).is_some());
     }
