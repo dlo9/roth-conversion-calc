@@ -9,6 +9,7 @@ use chrono::Duration;
 use chrono::Datelike;
 use chrono::naive::NaiveDate;
 use failure::*;
+use std::convert::TryFrom;
 
 pub struct ProjectArgs {
     // TODO: make Vec
@@ -149,12 +150,11 @@ fn get_rmd_distribution_period(birthday: NaiveDate, current_year: i32) -> Option
             4.2, 3.9, 3.7, 3.4, 3.1, 2.9, 2.6, 2.4, 2.1, 1.9
         ];
     }
-    let age_this_year = current_year - birthday.year();
 
-    Some(match age_this_year {
-        // use u64::TryFrom()
-        x @ 70 if birthday.month() < 7 => DISTRIBUTION_PERIODS[(x - 70) as usize],
-        x @ 71 ... 115 => DISTRIBUTION_PERIODS[(x - 70) as usize],
+    let age_this_year = current_year - birthday.year();
+    Some(match usize::try_from(age_this_year).unwrap_or_default() {
+        x @ 70 if birthday.month() < 7 => DISTRIBUTION_PERIODS[x - 70],
+        x @ 71 ... 115 => DISTRIBUTION_PERIODS[x - 70],
         x if x >= 115 => DISTRIBUTION_PERIODS[115 - 70],
         _ => return None,
     })
@@ -218,6 +218,31 @@ mod tests {
     #[test]
     fn rmd_distribution_period_turns_71_july_1() {
         assert_eq!(Some(26.5), get_rmd_distribution_period(NaiveDate::from_ymd(1948, 7, 1), 2019));
+    }
+
+    #[test]
+    fn rmd_distribution_period_age_butween_70_and_115() {
+        assert_eq!(Some(11.4), get_rmd_distribution_period(NaiveDate::from_ymd(2019 - 90, 3, 5), 2019));
+    }
+
+    #[test]
+    fn rmd_distribution_period_age_115() {
+        assert_eq!(Some(1.9), get_rmd_distribution_period(NaiveDate::from_ymd(2019 - 115, 3, 5), 2019));
+    }
+
+    #[test]
+    fn rmd_distribution_period_age_greater_than_115() {
+        assert_eq!(Some(1.9), get_rmd_distribution_period(NaiveDate::from_ymd(2019 - 116, 3, 5), 2019));
+    }
+
+    #[test]
+    fn rmd_distribution_period_age_less_than_70() {
+        assert_eq!(None, get_rmd_distribution_period(NaiveDate::from_ymd(2019 - 69, 3, 5), 2019));
+    }
+
+    #[test]
+    fn rmd_distribution_period_negative_age() {
+        assert_eq!(None, get_rmd_distribution_period(NaiveDate::from_ymd(2019 + 1, 3, 5), 2019));
     }
 
     #[test]
