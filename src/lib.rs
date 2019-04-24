@@ -100,7 +100,7 @@ impl State {
 
     }
 
-    fn successors(&self, args: &ProjectArgs) -> Result<Vec<(State, Cost)>, Error> {
+    fn successors(&self, args: &ProjectArgs) -> Result<impl IntoIterator<Item = (State, Cost)>, Error> {
         // TODO: place in args
         let rollover_amount = 1000;
 
@@ -110,13 +110,13 @@ impl State {
             vec![
                 self.step_time(args).ok(),
                 self.step_rollover(rollover_amount),
-            ].into_iter().filter_map(|x| x).collect()
-        })
+            ]
+        }.into_iter().filter_map(|x| x))
     }
 }
 
 // TODO: #[wasm_bindgen]
-pub fn project(args: ProjectArgs) -> Option<(Vec<State>, Cost)> {
+pub fn project(args: &ProjectArgs) -> Option<(Vec<State>, Cost)> {
     if args.validate().is_err() {
         return None;
     }
@@ -255,10 +255,10 @@ mod tests {
         assert_eq!(0, get_tax(0));
     }
 
-    #[test]
+    #[bench]
     #[ignore]
-    fn long_project() {
-        assert!(project(ProjectArgs {
+    fn long_project(b: &mut Bencher) {
+        let args = ProjectArgs {
             yearly_taxable_income_excluding_ira: 10000,
             inflation_effective_annual_rate: 0.03,
             roth_present_value: 5000,
@@ -268,12 +268,14 @@ mod tests {
             birthday: NaiveDate::from_ymd(1955, 6, 3),
             end_date: NaiveDate::from_ymd(2040, 12, 31),
             now: NaiveDate::from_ymd(2019, 12, 31),
-        }).is_some());
+        };
+
+        b.iter(|| assert!(project(&args).is_some()));
     }
 
-    #[test]
-    fn short_project() {
-        assert!(project(ProjectArgs {
+    #[bench]
+    fn short_project(b: &mut Bencher) {
+        let args = ProjectArgs {
             yearly_taxable_income_excluding_ira: 10000,
             inflation_effective_annual_rate: 0.03,
             roth_present_value: 5000,
@@ -284,11 +286,8 @@ mod tests {
             end_date: NaiveDate::from_ymd(2040, 12, 31),
             // O(2^n) scaling, n = end_year - now_year
             now: NaiveDate::from_ymd(2035, 12, 31),
-        }).is_some());
-    }
+        };
 
-    #[bench]
-    fn short_project_bench(b: &mut Bencher) {
-        b.iter(|| short_project());
+        b.iter(|| assert!(project(&args).is_some()));
     }
 }
