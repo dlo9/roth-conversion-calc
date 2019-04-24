@@ -141,9 +141,21 @@ pub fn get_rmd(birthday: NaiveDate, now: NaiveDate, ira_value: u64) -> Result<u6
     })
 }
 
-// TODO: tax tables, etc: https://taxmap.irs.gov/taxmap/ts0/taxtable_o_03b62156.htm
+// Tax tables: https://taxmap.irs.gov/taxmap/ts0/taxtable_o_03b62156.htm
+// 2019 Tax Rate Schedule: https://www.irs.gov/pub/irs-prior/f1040es--2019.pdf#page=7
+// TODO: AMT?
 pub fn get_tax(taxable_income: u64) -> u64 {
-    (taxable_income as f64 * 0.1) as u64
+    // TODO: applies to single filing status only
+    (match taxable_income as f64 {
+     x if x > 510_300f64 => 0.37 * (x - 510_300f64) + 153_798.50,
+     x if x > 204_100f64 => 0.35 * (x - 204_100f64) + 46_628.50,
+     x if x > 160_725f64 => 0.32 * (x - 160_725f64) + 32_748.50,
+     x if x > 84_200f64 => 0.24 * (x - 84_200f64) + 14_382.50,
+     x if x > 39_475f64 => 0.22 * (x - 39_475f64) + 4_543.00,
+     x if x > 9_700f64 => 0.12 * (x - 9_700f64) + 970.00,
+     x if x > 0f64 => 0.10 * x,
+     _ => 0f64,
+    }) as u64
 }
 
 fn to_continuous_compound_rate(effective_annual_rate: f64) -> f64 {
