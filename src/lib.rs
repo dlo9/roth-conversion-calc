@@ -1,5 +1,9 @@
+#![feature(test)]
+extern crate test;
+
 use pathfinding::prelude::astar;
 use chrono::Duration;
+use chrono::Datelike;
 use chrono::naive::NaiveDate;
 use failure::*;
 
@@ -59,7 +63,7 @@ impl State {
     fn step_time(&self, args: &ProjectArgs) -> Result<(State, Cost), Error> {
         let now = self.now.checked_add_signed(Duration::days(365)).ok_or_else(|| err_msg("overflow"))?;
         // TODO: is the rollover & RMD meshing properly?
-        let ira_rmd = get_rmd(args.birthday, now, self.ira_present_value)?.checked_sub(self.pending_rollover).unwrap_or_default();
+        let ira_rmd = get_rmd(args.birthday, now, self.ira_present_value).checked_sub(self.pending_rollover).unwrap_or_default();
         let ira_value = ((self.ira_present_value as f64) * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate)) as u64;
         let ira_value = ira_value - self.pending_rollover - ira_rmd;
 
@@ -132,8 +136,7 @@ pub fn project(args: ProjectArgs) -> Option<(Vec<State>, Cost)> {
 
 // TODO: only applies if (spouse not sole beneficiary) || (their age >= your age - 10)
 // Worksheet: https://www.irs.gov/pub/irs-tege/uniform_rmd_wksht.pdf
-pub fn get_rmd(birthday: NaiveDate, now: NaiveDate, prior_year_ending_ira_value: u64) -> Result<u64, Error> {
-    use chrono::Datelike;
+fn get_rmd_distribution_period(birthday: NaiveDate, current_year: i32) -> Option<f64> {
     // TODO: lazy_static
     // Index 0 == age 70
     let distribution_periods = [
@@ -142,19 +145,23 @@ pub fn get_rmd(birthday: NaiveDate, now: NaiveDate, prior_year_ending_ira_value:
         9.1, 8.6, 8.1, 7.6, 7.1, 6.7, 6.3, 5.9, 5.5, 5.2, 4.9, 4.5,
         4.2, 3.9, 3.7, 3.4, 3.1, 2.9, 2.6, 2.4, 2.1, 1.9
     ];
-    let age_this_year = now.year() - birthday.year();
+    let age_this_year = current_year - birthday.year();
 
-    let distribution_period = match age_this_year {
-        // TODO: test
+    Some(match age_this_year {
         // use u64::TryFrom()
         x @ 70 if birthday.month() < 7 => distribution_periods[(x - 70) as usize],
         x @ 71 ... 115 => distribution_periods[(x - 70) as usize],
         x if x >= 115 => distribution_periods[115 - 70],
-        _ => return Ok(0),
-    };
+        _ => return None,
+    })
+}
 
-    // TODO: split functions here for easier unit testing of above logic
-    Ok(((prior_year_ending_ira_value as f64) / distribution_period) as u64)
+fn get_rmd(birthday: NaiveDate, now: NaiveDate, prior_year_ending_ira_value: u64) -> u64 {
+    if let Some(distribution_period) = get_rmd_distribution_period(birthday, now.year()) {
+        ((prior_year_ending_ira_value as f64) / distribution_period) as u64
+    } else {
+        0
+    }
 }
 
 // Tax tables: https://taxmap.irs.gov/taxmap/ts0/taxtable_o_03b62156.htm
@@ -187,11 +194,32 @@ fn compound(current_value: f64, rate: f64, years: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test::Bencher;
 
     #[test]
-    fn it_works() {
+    fn rmd_distribution_period_turns_70_june_30() {
+        assert_eq!(Some(27.4), get_rmd_distribution_period(NaiveDate::from_ymd(1949, 6, 30), 2019));
+    }
+
+    #[test]
+    fn rmd_distribution_period_turns_71_june_30() {
+        assert_eq!(Some(26.5), get_rmd_distribution_period(NaiveDate::from_ymd(1948, 6, 30), 2019));
+    }
+
+    #[test]
+    fn rmd_distribution_period_turns_70_july_1() {
+        assert_eq!(None, get_rmd_distribution_period(NaiveDate::from_ymd(1949, 7, 1), 2019));
+    }
+
+    #[test]
+    fn rmd_distribution_period_turns_71_july_1() {
+        assert_eq!(Some(26.5), get_rmd_distribution_period(NaiveDate::from_ymd(1948, 7, 1), 2019));
+    }
+
+    #[test]
+    #[ignore]
+    fn long_project() {
         assert!(project(ProjectArgs {
-            // TODO: make Vec
             yearly_taxable_income_excluding_ira: 10000,
             inflation_effective_annual_rate: 0.03,
             roth_present_value: 5000,
@@ -202,5 +230,26 @@ mod tests {
             end_date: NaiveDate::from_ymd(2040, 12, 31),
             now: NaiveDate::from_ymd(2019, 12, 31),
         }).is_some());
+    }
+
+    #[test]
+    fn short_project() {
+        assert!(project(ProjectArgs {
+            yearly_taxable_income_excluding_ira: 10000,
+            inflation_effective_annual_rate: 0.03,
+            roth_present_value: 5000,
+            roth_effective_annual_rate: 0.08,
+            ira_present_value: 6000,
+            ira_effective_annual_rate: 0.08,
+            birthday: NaiveDate::from_ymd(1955, 6, 3),
+            end_date: NaiveDate::from_ymd(2040, 12, 31),
+            // O(2^n) scaling, n = end_year - now_year
+            now: NaiveDate::from_ymd(2035, 12, 31),
+        }).is_some());
+    }
+
+    #[bench]
+    fn short_project_bench(b: &mut Bencher) {
+        b.iter(|| short_project());
     }
 }
