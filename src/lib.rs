@@ -1,6 +1,9 @@
 #![feature(test)]
 extern crate test;
 
+#[macro_use]
+extern crate lazy_static;
+
 use pathfinding::prelude::astar;
 use chrono::Duration;
 use chrono::Datelike;
@@ -137,21 +140,22 @@ pub fn project(args: ProjectArgs) -> Option<(Vec<State>, Cost)> {
 // TODO: only applies if (spouse not sole beneficiary) || (their age >= your age - 10)
 // Worksheet: https://www.irs.gov/pub/irs-tege/uniform_rmd_wksht.pdf
 fn get_rmd_distribution_period(birthday: NaiveDate, current_year: i32) -> Option<f64> {
-    // TODO: lazy_static
-    // Index 0 == age 70
-    let distribution_periods = [
-        27.4, 26.5, 25.6, 24.7, 23.8, 22.9, 22.0, 21.2, 20.3, 19.5, 18.7, 17.9,
-        17.1, 16.3, 15.5, 14.8, 14.1, 13.4, 12.7, 12.0, 11.4, 10.8, 10.2, 9.6,
-        9.1, 8.6, 8.1, 7.6, 7.1, 6.7, 6.3, 5.9, 5.5, 5.2, 4.9, 4.5,
-        4.2, 3.9, 3.7, 3.4, 3.1, 2.9, 2.6, 2.4, 2.1, 1.9
-    ];
+    lazy_static! {
+        // Index 0 == age 70
+        static ref DISTRIBUTION_PERIODS: [f64; 46] = [
+            27.4, 26.5, 25.6, 24.7, 23.8, 22.9, 22.0, 21.2, 20.3, 19.5, 18.7, 17.9,
+            17.1, 16.3, 15.5, 14.8, 14.1, 13.4, 12.7, 12.0, 11.4, 10.8, 10.2, 9.6,
+            9.1, 8.6, 8.1, 7.6, 7.1, 6.7, 6.3, 5.9, 5.5, 5.2, 4.9, 4.5,
+            4.2, 3.9, 3.7, 3.4, 3.1, 2.9, 2.6, 2.4, 2.1, 1.9
+        ];
+    }
     let age_this_year = current_year - birthday.year();
 
     Some(match age_this_year {
         // use u64::TryFrom()
-        x @ 70 if birthday.month() < 7 => distribution_periods[(x - 70) as usize],
-        x @ 71 ... 115 => distribution_periods[(x - 70) as usize],
-        x if x >= 115 => distribution_periods[115 - 70],
+        x @ 70 if birthday.month() < 7 => DISTRIBUTION_PERIODS[(x - 70) as usize],
+        x @ 71 ... 115 => DISTRIBUTION_PERIODS[(x - 70) as usize],
+        x if x >= 115 => DISTRIBUTION_PERIODS[115 - 70],
         _ => return None,
     })
 }
