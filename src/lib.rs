@@ -12,6 +12,7 @@ pub struct ProjectArgs {
     ira_present_value: u64,
     ira_effective_annual_rate: f64,
     birthday: NaiveDate,
+    // TODO: these dates should ALWAYS be Dec 31. 
     end_date: NaiveDate,
     now: NaiveDate,
 }
@@ -58,8 +59,8 @@ impl State {
     fn step_time(&self, args: &ProjectArgs) -> Result<(State, Cost), Error> {
         let now = self.now.checked_add_signed(Duration::days(365)).ok_or_else(|| err_msg("overflow"))?;
         // TODO: is the rollover & RMD meshing properly?
+        let ira_rmd = get_rmd(args.birthday, now, self.ira_present_value)?.checked_sub(self.pending_rollover).unwrap_or_default();
         let ira_value = ((self.ira_present_value as f64) * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate)) as u64;
-        let ira_rmd = get_rmd(args.birthday, now, ira_value)?.checked_sub(self.pending_rollover).unwrap_or_default();
         let ira_value = ira_value - self.pending_rollover - ira_rmd;
 
         let roth_value = ((self.roth_present_value as f64) * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate)) as u64;
@@ -129,16 +130,31 @@ pub fn project(args: ProjectArgs) -> Option<(Vec<State>, Cost)> {
                ))
 }
 
-pub fn get_rmd(birthday: NaiveDate, now: NaiveDate, ira_value: u64) -> Result<u64, Error> {
-    let age = now.signed_duration_since(birthday);
-    let age_above_thresh = age.checked_sub(&Duration::days((365.0*74.5) as i64)).ok_or_else(|| err_msg("Overflow"))?;
+// TODO: only applies if (spouse not sole beneficiary) || (their age >= your age - 10)
+// Worksheet: https://www.irs.gov/pub/irs-tege/uniform_rmd_wksht.pdf
+pub fn get_rmd(birthday: NaiveDate, now: NaiveDate, prior_year_ending_ira_value: u64) -> Result<u64, Error> {
+    use chrono::Datelike;
+    // TODO: lazy_static
+    // Index 0 == age 70
+    let distribution_periods = [
+        27.4, 26.5, 25.6, 24.7, 23.8, 22.9, 22.0, 21.2, 20.3, 19.5, 18.7, 17.9,
+        17.1, 16.3, 15.5, 14.8, 14.1, 13.4, 12.7, 12.0, 11.4, 10.8, 10.2, 9.6,
+        9.1, 8.6, 8.1, 7.6, 7.1, 6.7, 6.3, 5.9, 5.5, 5.2, 4.9, 4.5,
+        4.2, 3.9, 3.7, 3.4, 3.1, 2.9, 2.6, 2.4, 2.1, 1.9
+    ];
+    let age_this_year = now.year() - birthday.year();
 
-    // TODO: https://www.irs.gov/pub/irs-tege/uniform_rmd_wksht.pdf
-    Ok(if age_above_thresh.num_days() > 0 {
-        (ira_value as f64 * 0.1) as u64
-    } else {
-        0
-    })
+    let distribution_period = match age_this_year {
+        // TODO: test
+        // use u64::TryFrom()
+        x @ 70 if birthday.month() < 7 => distribution_periods[(x - 70) as usize],
+        x @ 71 ... 115 => distribution_periods[(x - 70) as usize],
+        x if x >= 115 => distribution_periods[115 - 70],
+        _ => return Ok(0),
+    };
+
+    // TODO: split functions here for easier unit testing of above logic
+    Ok(((prior_year_ending_ira_value as f64) / distribution_period) as u64)
 }
 
 // Tax tables: https://taxmap.irs.gov/taxmap/ts0/taxtable_o_03b62156.htm
@@ -182,9 +198,9 @@ mod tests {
             roth_effective_annual_rate: 0.08,
             ira_present_value: 6000,
             ira_effective_annual_rate: 0.08,
-            birthday: NaiveDate::from_ymd(1955, 6,  3),
-            end_date: NaiveDate::from_ymd(2040, 6,  3),
-            now: NaiveDate::from_ymd(2019, 4, 22),
+            birthday: NaiveDate::from_ymd(1955, 6, 3),
+            end_date: NaiveDate::from_ymd(2040, 12, 31),
+            now: NaiveDate::from_ymd(2019, 12, 31),
         }).is_some());
     }
 }
