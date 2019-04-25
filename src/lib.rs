@@ -76,8 +76,7 @@ impl Hash for State {
 
 impl State {
     fn step_year(&self, args: &ProjectArgs) -> Result<(State, Cost), Error> {
-        // TODO: is the rollover & RMD meshing properly?
-        let ira_rmd = get_rmd(args.birth_year, args.birth_month, self.current_year, self.ira_present_value).checked_sub(self.pending_rollover).unwrap_or_default();
+        let ira_rmd = get_rmd(args.birth_year, args.birth_month, self.current_year, self.ira_present_value);
         let ira_value = ((self.ira_present_value as f64) * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate)) as u32;
         let ira_value = ira_value - self.pending_rollover - ira_rmd;
 
