@@ -214,6 +214,18 @@ fn get_rmd(birth_year: u16, birth_month: u8, year: u16, prior_year_ending_ira_va
     }
 }
 
+fn amount_remaining_in_tax_bracket(taxable_income: u32) -> Option<u32> {
+    Some(match taxable_income {
+        x if x > 510_300 => return None,
+        x if x > 204_100 => 510_300 - x,
+        x if x > 160_725 => 204_100 - x,
+        x if x > 84_200 => 160_725 - x,
+        x if x > 39_475 => 84_200 - x,
+        x if x > 9_700 => 39_475 - x,
+        x @ _ => 9_700 - x,
+    })
+}
+
 // Tax tables: https://taxmap.irs.gov/taxmap/ts0/taxtable_o_03b62156.htm
 // 2019 Tax Rate Schedule: https://www.irs.gov/pub/irs-prior/f1040es--2019.pdf#page=7
 // TODO: AMT?
