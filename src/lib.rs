@@ -53,6 +53,8 @@ impl ProjectArgs {
     }
 }
 
+type Cost = u32;
+
 // TODO: ira needs a basis amount
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct State {
@@ -69,40 +71,6 @@ impl Hash for State {
         self.pending_rollover.hash(state);
         self.current_year.hash(state);
         self.ira_present_value.hash(state);
-    }
-}
-
-type Cost = u32;
-
-struct Successors {
-    time: Option<(State, Cost)>,
-    rollover: Option<(State, Cost)>,
-}
-
-impl Successors {
-    pub fn new(parent: &State, args: &ProjectArgs) -> Successors {
-        Successors {
-            time: parent.step_year(args).ok(),
-            rollover: parent.step_rollover(1000),
-        }
-    }
-}
-
-impl Iterator for Successors {
-    type Item = (State, Cost);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut ret = None;
-
-        if self.time.is_some() {
-            std::mem::swap(&mut ret, &mut self.time);
-        }
-
-        if ret.is_none() && self.rollover.is_some() {
-            std::mem::swap(&mut ret, &mut self.rollover);
-        }
-
-        ret
     }
 }
 
@@ -140,6 +108,38 @@ impl State {
             None
         }
 
+    }
+}
+
+struct Successors {
+    time: Option<(State, Cost)>,
+    rollover: Option<(State, Cost)>,
+}
+
+impl Successors {
+    pub fn new(parent: &State, args: &ProjectArgs) -> Successors {
+        Successors {
+            time: parent.step_year(args).ok(),
+            rollover: parent.step_rollover(1000),
+        }
+    }
+}
+
+impl Iterator for Successors {
+    type Item = (State, Cost);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut ret = None;
+
+        if self.time.is_some() {
+            std::mem::swap(&mut ret, &mut self.time);
+        }
+
+        if ret.is_none() && self.rollover.is_some() {
+            std::mem::swap(&mut ret, &mut self.rollover);
+        }
+
+        ret
     }
 }
 
