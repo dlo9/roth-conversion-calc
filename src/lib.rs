@@ -20,6 +20,7 @@ pub struct ProjectArgs {
     birth_month: u8,
     start_year: u16,
     end_year: u16,
+    starting_cash: u32,
 }
 
 impl ProjectArgs {
@@ -59,10 +60,13 @@ type Cost = u32;
 #[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub struct State {
     year: u16,
-    ending_income: u32,
+    ending_taxable_income: u32,
+    ending_cash: u32,
     ending_nonelective_tax: u32,
     starting_roth: u32,
     starting_ira: u32,
+    total_tax: u32,
+    total_cash: u32,
 }
 
 impl State {
@@ -78,10 +82,15 @@ impl State {
 
         Self {
             year: start_year,
-            ending_income: ending_nonelective_income,
+            ending_taxable_income: ending_nonelective_income,
+            ending_cash: ending_nonelective_income - ending_nonelective_tax,
             ending_nonelective_tax: ending_nonelective_tax,
             starting_roth: starting_roth,
+            // TODO: off-by-one error on ending year
             starting_ira: starting_ira - rmd,
+            total_tax: 0,
+            // TODO: use rmd here, but ensure no off-by-one error on end year
+            total_cash: args.starting_cash,
         }
     }
 
@@ -103,10 +112,13 @@ impl State {
         Ok((
             Self {
                 year: next_year,
-                ending_income: ending_nonelective_income,
+                ending_taxable_income: ending_nonelective_income,
+                ending_cash: ending_nonelective_income - ending_nonelective_tax,
                 ending_nonelective_tax: ending_nonelective_tax,
                 starting_roth: starting_roth,
                 starting_ira: starting_ira - rmd,
+                total_tax: self.total_tax + self.ending_nonelective_tax,
+                total_cash: self.total_cash + self.ending_cash,
             },
             self.ending_nonelective_tax,
         ))
@@ -117,16 +129,24 @@ impl State {
             return None;
         }
 
-        let ending_income = self.ending_income + rollover_amount;
+        let ending_taxable_income = self.ending_taxable_income + rollover_amount;
         // TODO: store current tax instead of recalculating? This would also be useful since the
         // returned path doesn't give incremental costs, only the total path cost
-        let marginal_tax = get_tax(ending_income) - get_tax(self.ending_income);
+        let marginal_tax = get_tax(ending_taxable_income) - get_tax(self.ending_taxable_income);
+
+        // TODO: Could decrease rollover until tax == self.total_cash (or go into debt). However,
+        // this should not be a problem if sufficient funds are given at the start
+        if marginal_tax > self.total_cash {
+            return None;
+        }
 
         Some((
             Self {
-                ending_income: ending_income,
+                ending_taxable_income: ending_taxable_income,
                 starting_roth: self.starting_roth + rollover_amount,
                 starting_ira: self.starting_ira - rollover_amount,
+                total_tax: self.total_tax + marginal_tax,
+                total_cash: self.total_cash - marginal_tax,
                 ..*self
             },
             marginal_tax,
@@ -327,6 +347,7 @@ mod tests {
             birth_month: 6,
             start_year: 2019,
             end_year: 2040,
+            starting_cash: 5000,
         };
 
         b.iter(|| assert!(project(&args).is_some()));
@@ -345,6 +366,7 @@ mod tests {
             birth_month: 6,
             start_year: 2035,
             end_year: 2040,
+            starting_cash: 5000,
         };
 
         b.iter(|| assert!(project(&args).is_some()));
