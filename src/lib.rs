@@ -169,7 +169,7 @@ fn get_rmd_distribution_period(birth_year: u16, birth_month: u8, current_year: u
         ];
     }
 
-    let age_this_year = current_year - birth_year;
+    let age_this_year = current_year.checked_sub(birth_year).unwrap_or_default();
     // TODO: try_from still necessary now that I'm using u16?
     Some(match usize::try_from(age_this_year).unwrap_or_default() {
         x @ 70 if birth_month < 7 => DISTRIBUTION_PERIODS[x - 70],
