@@ -4,8 +4,8 @@ extern crate test;
 #[macro_use]
 extern crate lazy_static;
 
-use pathfinding::prelude::dijkstra;
 use failure::*;
+use pathfinding::prelude::dijkstra;
 use std::convert::TryFrom;
 
 pub struct ProjectArgs {
@@ -18,7 +18,6 @@ pub struct ProjectArgs {
     ira_effective_annual_rate: f64,
     birth_year: u16,
     birth_month: u8,
-    // TODO: these dates should ALWAYS be Dec 31. 
     start_year: u16,
     end_year: u16,
 }
@@ -29,13 +28,15 @@ impl ProjectArgs {
         // TODO: make custom types with validation ranges (from macro?), checked operations
         Err(if self.yearly_taxable_income_excluding_ira < 0 {
             err_msg("Yearly taxable income must be >= 0")
-        } else if self.inflation_effective_annual_rate > 1.0 || self.inflation_effective_annual_rate < 0.0 {
+        } else if self.inflation_effective_annual_rate > 1.0
+            || self.inflation_effective_annual_rate < 0.0
+        {
             err_msg("Inflation must be between 0 and 1")
-        } else if self.roth_present_value < 0{
+        } else if self.roth_present_value < 0 {
             err_msg("Roth value must be >= 0")
         } else if self.roth_effective_annual_rate > 1.0 || self.roth_effective_annual_rate < 0.0 {
             err_msg("Roth rate must be between 0 and 1")
-        } else if self.ira_present_value < 0{
+        } else if self.ira_present_value < 0 {
             err_msg("IRA value must be >= 0")
         } else if self.ira_effective_annual_rate > 1.0 || self.ira_effective_annual_rate < 0.0 {
             err_msg("IRA rate must be between 0 and 1")
@@ -47,7 +48,7 @@ impl ProjectArgs {
             // TODO^ range.contains once stable: https://doc.rust-lang.org/std/ops/struct.Range.html#method.contains
             err_msg("Birth month must be between 1 and 12")
         } else {
-            return Ok(())
+            return Ok(());
         })
     }
 }
@@ -87,22 +88,28 @@ impl State {
     fn step_year(&self, args: &ProjectArgs) -> Result<(Self, Cost), Error> {
         let next_year = self.year + 1;
 
-        let starting_roth = ((self.starting_roth as f64) * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate)) as u32;
-        let starting_ira = ((self.starting_ira as f64) * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate)) as u32;
+        let starting_roth = ((self.starting_roth as f64)
+            * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate))
+            as u32;
+        let starting_ira = ((self.starting_ira as f64)
+            * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate))
+            as u32;
 
         // TODO: split into required take_rmd, since this duplicates code in new?
         let rmd = get_rmd(args.birth_year, args.birth_month, next_year, starting_ira);
         let ending_nonelective_income = args.yearly_taxable_income_excluding_ira + rmd;
         let ending_nonelective_tax = get_tax(ending_nonelective_income);
 
-
-        Ok((Self {
-            year: next_year,
-            ending_income: ending_nonelective_income,
-            ending_nonelective_tax: ending_nonelective_tax,
-            starting_roth: starting_roth,
-            starting_ira: starting_ira - rmd,
-        }, self.ending_nonelective_tax))
+        Ok((
+            Self {
+                year: next_year,
+                ending_income: ending_nonelective_income,
+                ending_nonelective_tax: ending_nonelective_tax,
+                starting_roth: starting_roth,
+                starting_ira: starting_ira - rmd,
+            },
+            self.ending_nonelective_tax,
+        ))
     }
 
     fn step_rollover(&self, rollover_amount: u32) -> Option<(Self, Cost)> {
@@ -115,12 +122,15 @@ impl State {
         // returned path doesn't give incremental costs, only the total path cost
         let marginal_tax = get_tax(ending_income) - get_tax(self.ending_income);
 
-        Some((Self {
-            ending_income: ending_income,
-            starting_roth: self.starting_roth + rollover_amount,
-            starting_ira: self.starting_ira - rollover_amount,
-            .. *self
-        }, marginal_tax))
+        Some((
+            Self {
+                ending_income: ending_income,
+                starting_roth: self.starting_roth + rollover_amount,
+                starting_ira: self.starting_ira - rollover_amount,
+                ..*self
+            },
+            marginal_tax,
+        ))
     }
 }
 
@@ -165,11 +175,12 @@ pub fn project(args: &ProjectArgs) -> Option<(Vec<State>, Cost)> {
     let start = State::new(&args);
 
     //dbg!(astar(&start,
-    dbg!(dijkstra(&start,
-                  |s| Successors::new(s, args),
-                  //|s| s.ending_nonelective_tax,
-                  |s| s.year >= args.end_year,
-                  ))
+    dbg!(dijkstra(
+        &start,
+        |s| Successors::new(s, args),
+        //|s| s.ending_nonelective_tax,
+        |s| s.year >= args.end_year,
+    ))
 }
 
 // TODO: only applies if (spouse not sole beneficiary) || (their age >= your age - 10)
@@ -189,7 +200,7 @@ fn get_rmd_distribution_period(birth_year: u16, birth_month: u8, current_year: u
     // TODO: try_from still necessary now that I'm using u16?
     Some(match usize::try_from(age_this_year).unwrap_or_default() {
         x @ 70 if birth_month < 7 => DISTRIBUTION_PERIODS[x - 70],
-        x @ 71 ... 115 => DISTRIBUTION_PERIODS[x - 70],
+        x @ 71...115 => DISTRIBUTION_PERIODS[x - 70],
         x if x >= 115 => DISTRIBUTION_PERIODS[115 - 70],
         _ => return None,
     })
