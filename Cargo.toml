@@ -7,6 +7,5 @@ edition = "2018"
 [dependencies]
 #finance-math = "0.0.1"
 pathfinding = "1.1.12"
-chrono = "0.4.6"
 failure = "0.1.5"
 lazy_static = "1.3.0"
