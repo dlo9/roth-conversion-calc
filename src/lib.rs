@@ -63,6 +63,38 @@ pub struct State {
 
 type Cost = u64;
 
+struct Successors {
+    time: Option<(State, Cost)>,
+    rollover: Option<(State, Cost)>,
+}
+
+impl Successors {
+    pub fn new(parent: &State, args: &ProjectArgs) -> Successors {
+        Successors {
+            time: parent.step_time(args).ok(),
+            rollover: parent.step_rollover(1000),
+        }
+    }
+}
+
+impl Iterator for Successors {
+    type Item = (State, Cost);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut ret = None;
+
+        if self.time.is_some() {
+            std::mem::swap(&mut ret, &mut self.time);
+        }
+
+        if ret.is_none() && self.rollover.is_some() {
+            std::mem::swap(&mut ret, &mut self.rollover);
+        }
+
+        ret
+    }
+}
+
 impl State {
     fn step_time(&self, args: &ProjectArgs) -> Result<(State, Cost), Error> {
         let now = self.now.checked_add_signed(Duration::days(365)).ok_or_else(|| err_msg("overflow"))?;
@@ -99,20 +131,6 @@ impl State {
         }
 
     }
-
-    fn successors(&self, args: &ProjectArgs) -> Result<impl IntoIterator<Item = (State, Cost)>, Error> {
-        // TODO: place in args
-        let rollover_amount = 1000;
-
-        Ok(if self.now >= args.end_date {
-            vec![]
-        } else {
-            vec![
-                self.step_time(args).ok(),
-                self.step_rollover(rollover_amount),
-            ]
-        }.into_iter().filter_map(|x| x))
-    }
 }
 
 // TODO: #[wasm_bindgen]
@@ -131,7 +149,7 @@ pub fn project(args: &ProjectArgs) -> Option<(Vec<State>, Cost)> {
     };
 
     dbg!(astar(&start,
-               |ref s| s.successors(&args).unwrap(),
+               |ref s| Successors::new(s, args),
                // TODO: improve
                |ref s| get_tax(args.yearly_taxable_income_excluding_ira + s.pending_rollover),
                |ref s| s.now >= args.end_date,
