@@ -7,6 +7,7 @@ extern crate lazy_static;
 use pathfinding::prelude::astar;
 use failure::*;
 use std::convert::TryFrom;
+use std::hash::{Hash, Hasher};
 
 pub struct ProjectArgs {
     // TODO: make Vec
@@ -53,13 +54,22 @@ impl ProjectArgs {
 }
 
 // TODO: ira needs a basis amount
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct State {
     adjusted_spendable_income: u64,
     pending_rollover: u64,
     current_year: u16,
     roth_present_value: u64,
     ira_present_value: u64,
+}
+
+impl Hash for State {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.adjusted_spendable_income.hash(state);
+        self.pending_rollover.hash(state);
+        self.current_year.hash(state);
+        self.ira_present_value.hash(state);
+    }
 }
 
 type Cost = u64;
