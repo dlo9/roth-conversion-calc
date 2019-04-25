@@ -4,10 +4,9 @@ extern crate test;
 #[macro_use]
 extern crate lazy_static;
 
-use pathfinding::prelude::astar;
+use pathfinding::prelude::dijkstra;
 use failure::*;
 use std::convert::TryFrom;
-use std::hash::{Hash, Hasher};
 
 pub struct ProjectArgs {
     // TODO: make Vec
@@ -44,8 +43,8 @@ impl ProjectArgs {
             err_msg("Birth year must be <= start year")
         } else if self.start_year > self.end_year {
             err_msg("End year must be >= start year")
-        // TODO: range.contains once stable: https://doc.rust-lang.org/std/ops/struct.Range.html#method.contains
         } else if self.birth_month < 1 || self.birth_month > 12 {
+            // TODO^ range.contains once stable: https://doc.rust-lang.org/std/ops/struct.Range.html#method.contains
             err_msg("Birth month must be between 1 and 12")
         } else {
             return Ok(())
@@ -65,19 +64,9 @@ pub struct State {
     starting_ira: u32,
 }
 
-//impl Hash for State {
-//    fn hash<H: Hasher>(&self, state: &mut H) {
-//        self.adjusted_spendable_income.hash(state);
-//        self.pending_rollover.hash(state);
-//        self.current_year.hash(state);
-//        self.ira_present_value.hash(state);
-//    }
-//}
-
 impl State {
     fn new(args: &ProjectArgs) -> Self {
         let start_year = args.start_year;
-        let yearly_nonelective_income = args.yearly_taxable_income_excluding_ira;
         let starting_roth = args.roth_present_value;
         let starting_ira = args.ira_present_value;
 
@@ -175,17 +164,12 @@ pub fn project(args: &ProjectArgs) -> Option<(Vec<State>, Cost)> {
 
     let start = State::new(&args);
 
-//    dbg!(astar(&start,
-//               |s| Successors::new(s, args),
-//               // TODO: improve
-//               |s| s.ending_nonelective_tax,
-//               |s| s.year >= args.end_year,
-//               ))
-        dbg!(pathfinding::directed::dijkstra::dijkstra(&start,
-               |ref s| Successors::new(s, args),
-               // TODO: improve
-               |ref s| s.year >= args.end_year,
-               ))
+    //dbg!(astar(&start,
+    dbg!(dijkstra(&start,
+                  |s| Successors::new(s, args),
+                  //|s| s.ending_nonelective_tax,
+                  |s| s.year >= args.end_year,
+                  ))
 }
 
 // TODO: only applies if (spouse not sole beneficiary) || (their age >= your age - 10)
@@ -225,26 +209,26 @@ fn get_rmd(birth_year: u16, birth_month: u8, year: u16, prior_year_ending_ira_va
 // TODO: applies to single filing status only (make FilingStatus a trait with req'd fn figure_tax)
 fn get_tax(taxable_income: u32) -> u32 {
     (match taxable_income as f64 {
-     x if x > 510_300f64 => 0.37 * (x - 510_300f64) + 153_798.50,
-     x if x > 204_100f64 => 0.35 * (x - 204_100f64) + 46_628.50,
-     x if x > 160_725f64 => 0.32 * (x - 160_725f64) + 32_748.50,
-     x if x > 84_200f64 => 0.24 * (x - 84_200f64) + 14_382.50,
-     x if x > 39_475f64 => 0.22 * (x - 39_475f64) + 4_543.00,
-     x if x > 9_700f64 => 0.12 * (x - 9_700f64) + 970.00,
-     x if x > 0f64 => 0.10 * x,
-     _ => 0f64,
+        x if x > 510_300f64 => 0.37 * (x - 510_300f64) + 153_798.50,
+        x if x > 204_100f64 => 0.35 * (x - 204_100f64) + 46_628.50,
+        x if x > 160_725f64 => 0.32 * (x - 160_725f64) + 32_748.50,
+        x if x > 84_200f64 => 0.24 * (x - 84_200f64) + 14_382.50,
+        x if x > 39_475f64 => 0.22 * (x - 39_475f64) + 4_543.00,
+        x if x > 9_700f64 => 0.12 * (x - 9_700f64) + 970.00,
+        x if x > 0f64 => 0.10 * x,
+        _ => 0f64,
     }) as u32
 }
-
-fn to_continuous_compound_rate(effective_annual_rate: f64) -> f64 {
-    let n = 1_f64;
-    n * (effective_annual_rate/n).ln_1p()
-}
-
-fn compound(current_value: f64, rate: f64, years: f64) -> f64 {
-    use std::f64::consts::E;
-    current_value * E.powf(rate * years)
-}
+//
+//fn to_continuous_compound_rate(effective_annual_rate: f64) -> f64 {
+//    let n = 1_f64;
+//    n * (effective_annual_rate/n).ln_1p()
+//}
+//
+//fn compound(current_value: f64, rate: f64, years: f64) -> f64 {
+//    use std::f64::consts::E;
+//    current_value * E.powf(rate * years)
+//}
 
 #[cfg(test)]
 mod tests {
