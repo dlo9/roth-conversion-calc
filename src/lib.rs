@@ -112,10 +112,12 @@ impl State {
         ))
     }
 
-    fn step_rollover(&self, rollover_amount: u32) -> Option<(Self, Cost)> {
-        if self.starting_ira < rollover_amount {
-            return None;
+    fn step_rollover(&self) -> Option<(Self, Cost)> {
+        if self.starting_ira == 0 {
+            return None
         }
+
+        let rollover_amount = amount_remaining_in_tax_bracket(self.ending_income).map(|x| u32::min(x, self.starting_ira)).unwrap_or(self.starting_ira);
 
         let ending_income = self.ending_income + rollover_amount;
         // TODO: store current tax instead of recalculating? This would also be useful since the
@@ -143,7 +145,7 @@ impl Successors {
     pub fn new(parent: &State, args: &ProjectArgs) -> Successors {
         Successors {
             time: parent.step_year(args).ok(),
-            rollover: parent.step_rollover(1000),
+            rollover: parent.step_rollover(),
         }
     }
 }
