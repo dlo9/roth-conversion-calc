@@ -56,57 +56,82 @@ impl ProjectArgs {
 type Cost = u32;
 
 // TODO: ira needs a basis amount
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub struct State {
-    adjusted_spendable_income: u32,
-    pending_rollover: u32,
-    current_year: u16,
-    roth_present_value: u32,
-    ira_present_value: u32,
+    year: u16,
+    ending_income: u32,
+    ending_nonelective_tax: u32,
+    starting_roth: u32,
+    starting_ira: u32,
 }
 
-impl Hash for State {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.adjusted_spendable_income.hash(state);
-        self.pending_rollover.hash(state);
-        self.current_year.hash(state);
-        self.ira_present_value.hash(state);
-    }
-}
+//impl Hash for State {
+//    fn hash<H: Hasher>(&self, state: &mut H) {
+//        self.adjusted_spendable_income.hash(state);
+//        self.pending_rollover.hash(state);
+//        self.current_year.hash(state);
+//        self.ira_present_value.hash(state);
+//    }
+//}
 
 impl State {
-    fn step_year(&self, args: &ProjectArgs) -> Result<(State, Cost), Error> {
-        let ira_rmd = get_rmd(args.birth_year, args.birth_month, self.current_year, self.ira_present_value);
-        let ira_value = ((self.ira_present_value as f64) * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate)) as u32;
-        let ira_value = ira_value - self.pending_rollover - ira_rmd;
+    fn new(args: &ProjectArgs) -> Self {
+        let start_year = args.start_year;
+        let yearly_nonelective_income = args.yearly_taxable_income_excluding_ira;
+        let starting_roth = args.roth_present_value;
+        let starting_ira = args.ira_present_value;
 
-        let roth_value = ((self.roth_present_value as f64) * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate)) as u32;
-        let roth_value = roth_value + self.pending_rollover;
+        // TODO: split into required take_rmd, since this duplicates code in step_year?
+        let rmd = get_rmd(args.birth_year, args.birth_month, start_year, starting_ira);
+        let ending_nonelective_income = args.yearly_taxable_income_excluding_ira + rmd;
+        let ending_nonelective_tax = get_tax(ending_nonelective_income);
 
-        let taxable_income = args.yearly_taxable_income_excluding_ira + self.pending_rollover + ira_rmd;
-        let tax = get_tax(taxable_income);
-
-        Ok((State {
-            adjusted_spendable_income: self.adjusted_spendable_income + taxable_income,
-            pending_rollover: 0,
-            roth_present_value: roth_value,
-            ira_present_value: ira_value,
-            current_year: self.current_year + 1,
-            // TODO: want to maximize income, not minimize tax
-        }, tax)) 
+        Self {
+            year: start_year,
+            ending_income: ending_nonelective_income,
+            ending_nonelective_tax: ending_nonelective_tax,
+            starting_roth: starting_roth,
+            starting_ira: starting_ira - rmd,
+        }
     }
 
-    fn step_rollover(&self, rollover_amount: u32) -> Option<(State, Cost)> {
-        let pending_rollover = rollover_amount + self.pending_rollover;
-        if self.ira_present_value > pending_rollover {
-            Some((State {
-                pending_rollover: pending_rollover,
-                .. *self
-            }, 0))
-        } else {
-            None
+    fn step_year(&self, args: &ProjectArgs) -> Result<(Self, Cost), Error> {
+        let next_year = self.year + 1;
+
+        let starting_roth = ((self.starting_roth as f64) * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate)) as u32;
+        let starting_ira = ((self.starting_ira as f64) * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate)) as u32;
+
+        // TODO: split into required take_rmd, since this duplicates code in new?
+        let rmd = get_rmd(args.birth_year, args.birth_month, next_year, starting_ira);
+        let ending_nonelective_income = args.yearly_taxable_income_excluding_ira + rmd;
+        let ending_nonelective_tax = get_tax(ending_nonelective_income);
+
+
+        Ok((Self {
+            year: next_year,
+            ending_income: ending_nonelective_income,
+            ending_nonelective_tax: ending_nonelective_tax,
+            starting_roth: starting_roth,
+            starting_ira: starting_ira - rmd,
+        }, self.ending_nonelective_tax))
+    }
+
+    fn step_rollover(&self, rollover_amount: u32) -> Option<(Self, Cost)> {
+        if self.starting_ira < rollover_amount {
+            return None;
         }
 
+        let ending_income = self.ending_income + rollover_amount;
+        // TODO: store current tax instead of recalculating? This would also be useful since the
+        // returned path doesn't give incremental costs, only the total path cost
+        let marginal_tax = get_tax(ending_income) - get_tax(self.ending_income);
+
+        Some((Self {
+            ending_income: ending_income,
+            starting_roth: self.starting_roth + rollover_amount,
+            starting_ira: self.starting_ira - rollover_amount,
+            .. *self
+        }, marginal_tax))
     }
 }
 
@@ -148,20 +173,18 @@ pub fn project(args: &ProjectArgs) -> Option<(Vec<State>, Cost)> {
         return None;
     }
 
-    let start = State {
-        adjusted_spendable_income: 0,
-        pending_rollover: 0,
-        // TODO: Pass in from args instead, so tests are reproducible
-        current_year: args.start_year,
-        roth_present_value: args.roth_present_value,
-        ira_present_value: args.ira_present_value,
-    };
+    let start = State::new(&args);
 
-    dbg!(astar(&start,
+//    dbg!(astar(&start,
+//               |s| Successors::new(s, args),
+//               // TODO: improve
+//               |s| s.ending_nonelective_tax,
+//               |s| s.year >= args.end_year,
+//               ))
+        dbg!(pathfinding::directed::dijkstra::dijkstra(&start,
                |ref s| Successors::new(s, args),
                // TODO: improve
-               |ref s| get_tax(args.yearly_taxable_income_excluding_ira + s.pending_rollover),
-               |ref s| s.current_year >= args.end_year,
+               |ref s| s.year >= args.end_year,
                ))
 }
 
