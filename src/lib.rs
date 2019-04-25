@@ -11,11 +11,11 @@ use std::hash::{Hash, Hasher};
 
 pub struct ProjectArgs {
     // TODO: make Vec
-    yearly_taxable_income_excluding_ira: u64,
+    yearly_taxable_income_excluding_ira: u32,
     inflation_effective_annual_rate: f64,
-    roth_present_value: u64,
+    roth_present_value: u32,
     roth_effective_annual_rate: f64,
-    ira_present_value: u64,
+    ira_present_value: u32,
     ira_effective_annual_rate: f64,
     birth_year: u16,
     birth_month: u8,
@@ -56,11 +56,11 @@ impl ProjectArgs {
 // TODO: ira needs a basis amount
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct State {
-    adjusted_spendable_income: u64,
-    pending_rollover: u64,
+    adjusted_spendable_income: u32,
+    pending_rollover: u32,
     current_year: u16,
-    roth_present_value: u64,
-    ira_present_value: u64,
+    roth_present_value: u32,
+    ira_present_value: u32,
 }
 
 impl Hash for State {
@@ -72,7 +72,7 @@ impl Hash for State {
     }
 }
 
-type Cost = u64;
+type Cost = u32;
 
 struct Successors {
     time: Option<(State, Cost)>,
@@ -110,10 +110,10 @@ impl State {
     fn step_year(&self, args: &ProjectArgs) -> Result<(State, Cost), Error> {
         // TODO: is the rollover & RMD meshing properly?
         let ira_rmd = get_rmd(args.birth_year, args.birth_month, self.current_year, self.ira_present_value).checked_sub(self.pending_rollover).unwrap_or_default();
-        let ira_value = ((self.ira_present_value as f64) * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate)) as u64;
+        let ira_value = ((self.ira_present_value as f64) * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate)) as u32;
         let ira_value = ira_value - self.pending_rollover - ira_rmd;
 
-        let roth_value = ((self.roth_present_value as f64) * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate)) as u64;
+        let roth_value = ((self.roth_present_value as f64) * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate)) as u32;
         let roth_value = roth_value + self.pending_rollover;
 
         let taxable_income = args.yearly_taxable_income_excluding_ira + self.pending_rollover + ira_rmd;
@@ -129,7 +129,7 @@ impl State {
         }, tax)) 
     }
 
-    fn step_rollover(&self, rollover_amount: u64) -> Option<(State, Cost)> {
+    fn step_rollover(&self, rollover_amount: u32) -> Option<(State, Cost)> {
         let pending_rollover = rollover_amount + self.pending_rollover;
         if self.ira_present_value > pending_rollover {
             Some((State {
@@ -189,9 +189,9 @@ fn get_rmd_distribution_period(birth_year: u16, birth_month: u8, current_year: u
     })
 }
 
-fn get_rmd(birth_year: u16, birth_month: u8, year: u16, prior_year_ending_ira_value: u64) -> u64 {
+fn get_rmd(birth_year: u16, birth_month: u8, year: u16, prior_year_ending_ira_value: u32) -> u32 {
     if let Some(distribution_period) = get_rmd_distribution_period(birth_year, birth_month, year) {
-        ((prior_year_ending_ira_value as f64) / distribution_period) as u64
+        ((prior_year_ending_ira_value as f64) / distribution_period) as u32
     } else {
         0
     }
@@ -201,7 +201,7 @@ fn get_rmd(birth_year: u16, birth_month: u8, year: u16, prior_year_ending_ira_va
 // 2019 Tax Rate Schedule: https://www.irs.gov/pub/irs-prior/f1040es--2019.pdf#page=7
 // TODO: AMT?
 // TODO: applies to single filing status only (make FilingStatus a trait with req'd fn figure_tax)
-fn get_tax(taxable_income: u64) -> u64 {
+fn get_tax(taxable_income: u32) -> u32 {
     (match taxable_income as f64 {
      x if x > 510_300f64 => 0.37 * (x - 510_300f64) + 153_798.50,
      x if x > 204_100f64 => 0.35 * (x - 204_100f64) + 46_628.50,
@@ -211,7 +211,7 @@ fn get_tax(taxable_income: u64) -> u64 {
      x if x > 9_700f64 => 0.12 * (x - 9_700f64) + 970.00,
      x if x > 0f64 => 0.10 * x,
      _ => 0f64,
-    }) as u64
+    }) as u32
 }
 
 fn to_continuous_compound_rate(effective_annual_rate: f64) -> f64 {
