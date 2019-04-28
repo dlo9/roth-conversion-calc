@@ -57,6 +57,8 @@ impl ProjectArgs {
     }
 }
 
+// TODO: fix 2x slowdown caused by one of these impls
+#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 enum Action {
     Continue,
     RolloverThenContinue(u32),
@@ -67,7 +69,7 @@ type Cost = u32;
 #[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub struct State {
     year: u16,
-    //previous_action: Option<Action>,
+    previous_action: Option<Action>,
     // Values as of Dec. 31 of prior year
     roth: u32,
     ira: u32,
@@ -80,7 +82,7 @@ impl State {
     fn new(args: &ProjectArgs) -> Self {
         Self {
             year: args.start_year,
-            //previous_action: None,
+            previous_action: None,
             roth: args.roth_present_value,
             ira: args.ira_present_value,
             basis: args.basis_value,
@@ -129,7 +131,7 @@ impl State {
         Some((
             Self {
                 year: self.year + 1,
-                //previous_action: action,
+                previous_action: Some(action),
                 roth,
                 ira,
                 basis,
