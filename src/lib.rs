@@ -143,36 +143,11 @@ impl State {
     }
 }
 
-struct Successors {
-    time: Option<(State, Cost)>,
-    rollover: Option<(State, Cost)>,
-}
-
-impl Successors {
-    pub fn new(parent: &State, args: &ProjectArgs) -> Successors {
-        Successors {
-            time: parent.take_action(Action::Continue, args),
-            rollover: parent.take_action(Action::RolloverThenContinue(1000), args),
-        }
-    }
-}
-
-impl Iterator for Successors {
-    type Item = (State, Cost);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut ret = None;
-
-        if self.time.is_some() {
-            std::mem::swap(&mut ret, &mut self.time);
-        }
-
-        if ret.is_none() && self.rollover.is_some() {
-            std::mem::swap(&mut ret, &mut self.rollover);
-        }
-
-        ret
-    }
+fn successors(parent: &State, args: &ProjectArgs) -> impl IntoIterator<Item = (State, Cost)> {
+    vec![
+        parent.take_action(Action::Continue, args),
+        parent.take_action(Action::RolloverThenContinue(1000), args),
+    ].into_iter().filter_map(|x| x)
 }
 
 // TODO: #[wasm_bindgen]
@@ -186,7 +161,7 @@ pub fn project(args: &ProjectArgs) -> Option<(Vec<State>, Cost)> {
     //dbg!(astar(&start,
     dbg!(dijkstra(
         &start,
-        |s| Successors::new(s, args),
+        |s| successors(s, args),
         //|s| s.ending_nonelective_tax,
         |s| s.year > args.end_year,
     ))
