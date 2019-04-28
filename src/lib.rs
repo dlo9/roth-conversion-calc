@@ -16,6 +16,7 @@ pub struct ProjectArgs {
     roth_effective_annual_rate: f64,
     ira_present_value: u32,
     ira_effective_annual_rate: f64,
+    basis_value: u32,
     birth_year: u16,
     birth_month: u8,
     start_year: u16,
@@ -39,6 +40,8 @@ impl ProjectArgs {
             err_msg("Roth rate must be between 0 and 1")
         } else if self.ira_present_value < 0 {
             err_msg("IRA value must be >= 0")
+        } else if self.ira_present_value < self.basis_value {
+            err_msg("IRA value must be greater than the basis")
         } else if self.ira_effective_annual_rate > 1.0 || self.ira_effective_annual_rate < 0.0 {
             err_msg("IRA rate must be between 0 and 1")
         } else if self.birth_year > self.start_year {
@@ -54,102 +57,86 @@ impl ProjectArgs {
     }
 }
 
+enum Action {
+    Continue,
+    RolloverThenContinue(u32),
+}
+
 type Cost = u32;
 
-// TODO: ira needs a basis amount
 #[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub struct State {
     year: u16,
-    ending_taxable_income: u32,
-    ending_cash: u32,
-    ending_nonelective_tax: u32,
-    starting_roth: u32,
-    starting_ira: u32,
-    total_tax: u32,
+    //previous_action: Option<Action>,
+    // Values as of Dec. 31 of prior year
+    roth: u32,
+    ira: u32,
+    basis: u32,
     total_cash: u32,
+    total_tax: u32,
 }
 
 impl State {
     fn new(args: &ProjectArgs) -> Self {
-        let start_year = args.start_year;
-        let starting_roth = args.roth_present_value;
-        let starting_ira = args.ira_present_value;
-
-        // TODO: split into required take_rmd, since this duplicates code in step_year?
-        let rmd = get_rmd(args.birth_year, args.birth_month, start_year, starting_ira);
-        let ending_nonelective_income = args.yearly_taxable_income_excluding_ira + rmd;
-        let ending_nonelective_tax = get_tax(ending_nonelective_income);
-
         Self {
-            year: start_year,
-            ending_taxable_income: ending_nonelective_income,
-            ending_cash: ending_nonelective_income - ending_nonelective_tax,
-            ending_nonelective_tax: ending_nonelective_tax,
-            starting_roth: starting_roth,
-            // TODO: off-by-one error on ending year
-            starting_ira: starting_ira - rmd,
-            total_tax: 0,
-            // TODO: use rmd here, but ensure no off-by-one error on end year
+            year: args.start_year,
+            //previous_action: None,
+            roth: args.roth_present_value,
+            ira: args.ira_present_value,
+            basis: args.basis_value,
             total_cash: args.starting_cash,
+            total_tax: 0,
         }
     }
 
-    fn step_year(&self, args: &ProjectArgs) -> Result<(Self, Cost), Error> {
-        let next_year = self.year + 1;
+    fn take_action(&self, action: Action, args: &ProjectArgs) -> Option<(Self, Cost)> {
+        let rollover = match action {
+            Action::Continue => 0,
+            Action::RolloverThenContinue(x) => x,
+        };
 
-        let starting_roth = ((self.starting_roth as f64)
+        if self.ira < rollover {
+            return None;
+        }
+
+        let rmd = get_rmd(args.birth_year, args.birth_month, self.year, self.ira);
+        if self.ira < rollover + rmd {
+            return None;
+        }
+
+        // Take RMD, rollovers at the start of the year
+        let roth = ((self.roth + rollover) as f64
             * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate))
             as u32;
-        let starting_ira = ((self.starting_ira as f64)
+        let ira = ((self.ira - rmd - rollover) as f64
             * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate))
             as u32;
 
-        // TODO: split into required take_rmd, since this duplicates code in new?
-        let rmd = get_rmd(args.birth_year, args.birth_month, next_year, starting_ira);
-        let ending_nonelective_income = args.yearly_taxable_income_excluding_ira + rmd;
-        let ending_nonelective_tax = get_tax(ending_nonelective_income);
+        let basis_percent = if ira != 0 {
+            self.basis / (ira + rmd + rollover)
+        } else {
+            0
+        };
+        let nontaxable_distributions = basis_percent * (rmd + rollover);
+        let basis = self.basis - nontaxable_distributions;
 
-        Ok((
-            Self {
-                year: next_year,
-                ending_taxable_income: ending_nonelective_income,
-                ending_cash: ending_nonelective_income - ending_nonelective_tax,
-                ending_nonelective_tax: ending_nonelective_tax,
-                starting_roth: starting_roth,
-                starting_ira: starting_ira - rmd,
-                total_tax: self.total_tax + self.ending_nonelective_tax,
-                total_cash: self.total_cash + self.ending_cash,
-            },
-            self.ending_nonelective_tax,
-        ))
-    }
-
-    fn step_rollover(&self, rollover_amount: u32) -> Option<(Self, Cost)> {
-        if self.starting_ira < rollover_amount {
-            return None;
-        }
-
-        let ending_taxable_income = self.ending_taxable_income + rollover_amount;
-        // TODO: store current tax instead of recalculating? This would also be useful since the
-        // returned path doesn't give incremental costs, only the total path cost
-        let marginal_tax = get_tax(ending_taxable_income) - get_tax(self.ending_taxable_income);
-
-        // TODO: Could decrease rollover until tax == self.total_cash (or go into debt). However,
-        // this should not be a problem if sufficient funds are given at the start
-        if marginal_tax > self.total_cash {
-            return None;
-        }
+        let taxable_income =
+            (1 - basis_percent) * (rmd + rollover) + args.yearly_taxable_income_excluding_ira;
+        let tax = get_tax(taxable_income);
+        // TODO: include total_cash here, possible overflow otherwise due to rollovers
+        let cash = rmd + args.yearly_taxable_income_excluding_ira - tax;
 
         Some((
             Self {
-                ending_taxable_income: ending_taxable_income,
-                starting_roth: self.starting_roth + rollover_amount,
-                starting_ira: self.starting_ira - rollover_amount,
-                total_tax: self.total_tax + marginal_tax,
-                total_cash: self.total_cash - marginal_tax,
-                ..*self
+                year: self.year + 1,
+                //previous_action: action,
+                roth,
+                ira,
+                basis,
+                total_cash: self.total_cash + cash,
+                total_tax: self.total_tax + tax,
             },
-            marginal_tax,
+            tax,
         ))
     }
 }
@@ -162,8 +149,8 @@ struct Successors {
 impl Successors {
     pub fn new(parent: &State, args: &ProjectArgs) -> Successors {
         Successors {
-            time: parent.step_year(args).ok(),
-            rollover: parent.step_rollover(1000),
+            time: parent.take_action(Action::Continue, args),
+            rollover: parent.take_action(Action::RolloverThenContinue(1000), args),
         }
     }
 }
@@ -199,7 +186,7 @@ pub fn project(args: &ProjectArgs) -> Option<(Vec<State>, Cost)> {
         &start,
         |s| Successors::new(s, args),
         //|s| s.ending_nonelective_tax,
-        |s| s.year >= args.end_year,
+        |s| s.year > args.end_year,
     ))
 }
 
@@ -343,6 +330,7 @@ mod tests {
             roth_effective_annual_rate: 0.08,
             ira_present_value: 6000,
             ira_effective_annual_rate: 0.08,
+            basis_value: 0,
             birth_year: 1955,
             birth_month: 6,
             start_year: 2019,
@@ -362,6 +350,7 @@ mod tests {
             roth_effective_annual_rate: 0.08,
             ira_present_value: 6000,
             ira_effective_annual_rate: 0.08,
+            basis_value: 0,
             birth_year: 1955,
             birth_month: 6,
             start_year: 2035,
