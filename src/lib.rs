@@ -93,8 +93,11 @@ impl State {
         }
     }
 
-    fn maximum_spendable_cash(&self) -> u32 {
-        self.roth + self.total_cash // + self.ira
+    // Assuming ira is withdrawn immediately. TODO: use max(withdrawn year-end, year-begin)?
+    fn maximum_after_tax_cash(&self, args: &ProjectArgs) -> u32 {
+        let taxable_income = self.ira - self.basis + args.yearly_taxable_income_excluding_ira;
+        let tax = get_tax(taxable_income);
+        self.roth + self.total_cash + self.basis + taxable_income - tax
     }
 
     fn take_action(&self, action: Action, args: &ProjectArgs) -> Option<(Self, Cost)> {
@@ -144,8 +147,9 @@ impl State {
             total_tax: self.total_tax + tax,
         };
 
-        let cost = new_state.maximum_spendable_cash() - self.maximum_spendable_cash();
-        Some((new_state, cost))
+        // TODO: Store in state to cache calculation
+        let diff = new_state.maximum_after_tax_cash(args) - self.maximum_after_tax_cash(args);
+        Some((new_state, diff))
     }
 }
 
