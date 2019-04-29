@@ -140,7 +140,7 @@ impl State {
                 total_cash: self.total_cash + cash,
                 total_tax: self.total_tax + tax,
             },
-            tax,
+            cash + (roth - self.roth),
         ))
     }
 }
@@ -175,7 +175,7 @@ where
         // TODO: cleanup
         // if let chain isn't yet stable
         let path = shortest_path.get_or_insert_with(|| (VecDeque::new(), current_cost));
-        if current_cost < path.1 || path.0.len() == 0 {
+        if current_cost > path.1 || path.0.len() == 0 {
             found_current_shortest_path = true;
             path.1 = current_cost;
             path.0.clear();
