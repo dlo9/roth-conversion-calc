@@ -93,6 +93,10 @@ impl State {
         }
     }
 
+    fn maximum_spendable_cash(&self) -> u32 {
+        self.roth + self.total_cash // + self.ira
+    }
+
     fn take_action(&self, action: Action, args: &ProjectArgs) -> Option<(Self, Cost)> {
         let rollover = match action {
             Action::Continue => 0,
@@ -130,18 +134,18 @@ impl State {
         // TODO: include total_cash here, possible overflow otherwise due to rollovers
         let cash = rmd + args.yearly_taxable_income_excluding_ira - tax;
 
-        Some((
-            Self {
-                year: self.year + 1,
-                previous_action: Some(action),
-                roth,
-                ira,
-                basis,
-                total_cash: self.total_cash + cash,
-                total_tax: self.total_tax + tax,
-            },
-            cash + (roth - self.roth),
-        ))
+        let new_state = Self {
+            year: self.year + 1,
+            previous_action: Some(action),
+            roth,
+            ira,
+            basis,
+            total_cash: self.total_cash + cash,
+            total_tax: self.total_tax + tax,
+        };
+
+        let cost = new_state.maximum_spendable_cash() - self.maximum_spendable_cash();
+        Some((new_state, cost))
     }
 }
 
