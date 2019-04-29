@@ -5,8 +5,10 @@ extern crate test;
 extern crate lazy_static;
 
 use failure::*;
-use pathfinding::prelude::dijkstra;
+use num_traits::identities::Zero;
+use std::collections::vec_deque::VecDeque;
 use std::convert::TryFrom;
+use std::hash::Hash;
 
 pub struct ProjectArgs {
     // TODO: make Vec
@@ -147,23 +149,91 @@ fn successors(parent: &State, args: &ProjectArgs) -> impl IntoIterator<Item = (S
     vec![
         parent.take_action(Action::Continue, args),
         parent.take_action(Action::RolloverThenContinue(1000), args),
-    ].into_iter().filter_map(|x| x)
+    ]
+    .into_iter()
+    .filter_map(|x| x)
+}
+
+// TODO: parallelize?
+pub fn shortest_path_recursive<N, C, FN, IN, FS>(
+    current: N,
+    current_cost: C,
+    shortest_path: &mut Option<(VecDeque<N>, C)>,
+    successors: &FN,
+    success: &FS,
+) -> bool
+where
+    N: Eq + Hash + Clone,
+    C: Zero + Ord + Copy,
+    FN: Fn(&N) -> IN,
+    IN: IntoIterator<Item = (N, C)>,
+    FS: Fn(&N) -> bool,
+{
+    let mut found_current_shortest_path = false;
+
+    if success(&current) {
+        // TODO: cleanup
+        // if let chain isn't yet stable
+        let path = shortest_path.get_or_insert_with(|| (VecDeque::new(), current_cost));
+        if current_cost < path.1 || path.0.len() == 0 {
+            found_current_shortest_path = true;
+            path.1 = current_cost;
+            path.0.clear();
+        }
+    } else {
+        for (next, cost) in successors(&current) {
+            found_current_shortest_path = shortest_path_recursive(
+                next,
+                current_cost + cost,
+                shortest_path,
+                successors,
+                success,
+            ) || found_current_shortest_path;
+        }
+    }
+
+    if found_current_shortest_path {
+        if let Some(path) = shortest_path {
+            path.0.push_front(current);
+        }
+    }
+
+    found_current_shortest_path
+}
+
+// TODO: Docs
+// Returns the lowest-cost terminating path, if the generated graph is a topologically ordered DAG.
+// The assumptions here are not checked. TODO: panic if assumptions broken?
+// All nodes in the graph will be visited.
+pub fn shortest_path<N, C, FN, IN, FS>(
+    start: N,
+    successors: &FN,
+    success: &FS,
+) -> Option<(VecDeque<N>, C)>
+where
+    N: Eq + Hash + Clone,
+    C: Zero + Ord + Copy,
+    FN: Fn(&N) -> IN,
+    IN: IntoIterator<Item = (N, C)>,
+    FS: Fn(&N) -> bool,
+{
+    let mut shortest_path: Option<(VecDeque<N>, C)> = None;
+    shortest_path_recursive(start, C::zero(), &mut shortest_path, successors, success);
+    shortest_path
 }
 
 // TODO: #[wasm_bindgen]
-pub fn project(args: &ProjectArgs) -> Option<(Vec<State>, Cost)> {
+pub fn project(args: &ProjectArgs) -> Option<(VecDeque<State>, Cost)> {
     if args.validate().is_err() {
         return None;
     }
 
     let start = State::new(&args);
 
-    //dbg!(astar(&start,
-    dbg!(dijkstra(
-        &start,
-        |s| successors(s, args),
-        //|s| s.ending_nonelective_tax,
-        |s| s.year > args.end_year,
+    dbg!(shortest_path(
+        start,
+        &mut |s| successors(s, args),
+        &mut |s| s.year > args.end_year,
     ))
 }
 
