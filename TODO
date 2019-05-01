@@ -1,0 +1,2 @@
+Add to CI:
+	cargo doc --document-private-items

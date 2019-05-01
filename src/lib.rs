@@ -3,6 +3,8 @@ extern crate test;
 
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate derive_new;
 
 mod utils;
 
@@ -83,39 +85,44 @@ enum Action {
 
 type Cost = u32;
 
-#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd, new)]
 pub struct State {
     year: u16,
+    #[new(default)]
     previous_action: Option<Action>,
     // Values as of Dec. 31 of prior year
     roth: u32,
     ira: u32,
     basis: u32,
     total_cash: u32,
+    #[new(default)]
     total_tax: u32,
 }
 
 impl State {
-    fn new(args: &ProjectArgs) -> Self {
-        Self {
-            year: args.start_year,
-            previous_action: None,
-            roth: args.roth_present_value,
-            ira: args.ira_present_value,
-            basis: args.basis_value,
-            total_cash: args.starting_cash,
-            total_tax: 0,
-        }
-    }
-
     // Assuming ira is withdrawn immediately. TODO: use max(withdrawn year-end, year-begin)?
-    fn maximum_after_tax_cash(&self, args: &ProjectArgs) -> u32 {
-        let taxable_income = self.ira - self.basis + args.yearly_taxable_income_excluding_ira;
+    /// Returns the after-tax value of all accounts when liquidated this year
+    ///
+    /// # Arguments
+    ///
+    /// * `income` - This year's after-deduction income, which must not include ira or roth
+    /// withdraws.
+    fn maximum_after_tax_cash(&self, income: u32) -> u32 {
+        let taxable_income = self.ira - self.basis + income;
         let tax = get_tax(taxable_income);
         self.roth + self.total_cash + self.basis + taxable_income - tax
     }
 
-    fn take_action(&self, action: Action, args: &ProjectArgs) -> Option<(Self, Cost)> {
+    fn take_action(
+        &self,
+        action: Action,
+        birth_year: u16,
+        birth_month: u8,
+        income: u32,
+        roth_rate: f64,
+        ira_rate: f64,
+        inflation: f64,
+    ) -> Option<(Self, Cost)> {
         let rollover = match action {
             Action::Continue => 0,
             Action::RolloverThenContinue(x) => x,
@@ -125,18 +132,14 @@ impl State {
             return None;
         }
 
-        let rmd = get_rmd(args.birth_year, args.birth_month, self.year, self.ira);
+        let rmd = get_rmd(birth_year, birth_month, self.year, self.ira);
         if self.ira < rollover + rmd {
             return None;
         }
 
         // Take RMD, rollovers at the start of the year
-        let roth = ((self.roth + rollover) as f64
-            * (1f64 + args.roth_effective_annual_rate - args.inflation_effective_annual_rate))
-            as u32;
-        let ira = ((self.ira - rmd - rollover) as f64
-            * (1f64 + args.ira_effective_annual_rate - args.inflation_effective_annual_rate))
-            as u32;
+        let roth = ((self.roth + rollover) as f64 * (1f64 + roth_rate - inflation)) as u32;
+        let ira = ((self.ira - rmd - rollover) as f64 * (1f64 + ira_rate - inflation)) as u32;
 
         let basis_percent = if ira != 0 {
             self.basis / (ira + rmd + rollover)
@@ -146,11 +149,10 @@ impl State {
         let nontaxable_distributions = basis_percent * (rmd + rollover);
         let basis = self.basis - nontaxable_distributions;
 
-        let taxable_income =
-            (1 - basis_percent) * (rmd + rollover) + args.yearly_taxable_income_excluding_ira;
+        let taxable_income = (1 - basis_percent) * (rmd + rollover) + income;
         let tax = get_tax(taxable_income);
         // TODO: include total_cash here, possible overflow otherwise due to rollovers
-        let cash = rmd + args.yearly_taxable_income_excluding_ira - tax;
+        let cash = rmd + income - tax;
 
         let new_state = Self {
             year: self.year + 1,
@@ -163,15 +165,31 @@ impl State {
         };
 
         // TODO: Store in state to cache calculation
-        let diff = new_state.maximum_after_tax_cash(args) - self.maximum_after_tax_cash(args);
+        let diff = new_state.maximum_after_tax_cash(income) - self.maximum_after_tax_cash(income);
         Some((new_state, diff))
     }
 }
 
 fn successors(parent: &State, args: &ProjectArgs) -> impl IntoIterator<Item = (State, Cost)> {
     vec![
-        parent.take_action(Action::Continue, args),
-        parent.take_action(Action::RolloverThenContinue(1000), args),
+        parent.take_action(
+            Action::Continue,
+            args.birth_year,
+            args.birth_month,
+            args.yearly_taxable_income_excluding_ira,
+            args.roth_effective_annual_rate,
+            args.ira_effective_annual_rate,
+            args.inflation_effective_annual_rate,
+        ),
+        parent.take_action(
+            Action::RolloverThenContinue(1000),
+            args.birth_year,
+            args.birth_month,
+            args.yearly_taxable_income_excluding_ira,
+            args.roth_effective_annual_rate,
+            args.ira_effective_annual_rate,
+            args.inflation_effective_annual_rate,
+        ),
     ]
     .into_iter()
     .filter_map(|x| x)
@@ -251,7 +269,13 @@ pub fn project(args: &ProjectArgs) -> Option<(VecDeque<State>, Cost)> {
         return None;
     }
 
-    let start = State::new(&args);
+    let start = State::new(
+        args.start_year,
+        args.roth_present_value,
+        args.ira_present_value,
+        args.basis_value,
+        args.starting_cash,
+    );
 
     dbg!(shortest_path(
         start,
